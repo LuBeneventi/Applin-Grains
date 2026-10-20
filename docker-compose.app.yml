@@ -1,0 +1,128 @@
+services:
+  # ==============================================================
+  # BASE DE DATOS POSTGRESQL (Catálogo y Órdenes)
+  # ==============================================================
+  postgres-db:
+    image: postgres:16-alpine
+    container_name: pedidos360-db
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-postgres}
+      - POSTGRES_DB=postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    networks:
+      - pedidos360-net
+    restart: unless-stopped
+
+  # ==============================================================
+  # MICROSERVICIOS DE NEGOCIO
+  # ==============================================================
+
+  # Microservicio de Catálogo de Productos
+  ms-catalog:
+    build:
+      context: ./ms-pedidos360-catalog
+      dockerfile: Dockerfile
+    container_name: pedidos360-catalog
+    ports:
+      - "8086:8086"
+    environment:
+      - PORT=8086
+      - DB_HOST=postgres-db
+      - DB_PORT=5432
+      - DB_NAME=pedidos360_catalog
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_SSLMODE=disable
+    depends_on:
+      - postgres-db
+    networks:
+      - pedidos360-net
+    restart: unless-stopped
+
+  # Microservicio de Órdenes / Pedidos
+  ms-orders:
+    build:
+      context: ./ms-pedidos360-orders
+      dockerfile: Dockerfile
+    container_name: pedidos360-orders
+    ports:
+      - "8087:8087"
+    environment:
+      - PORT=8087
+      - DB_HOST=postgres-db
+      - DB_PORT=5432
+      - DB_NAME=pedidos360_orders
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_SSLMODE=disable
+      # Conexión al RabbitMQ (instancia EC2 de RabbitMQ)
+      - RABBITMQ_HOST=${RABBITMQ_HOST:-127.0.0.1}
+      - RABBITMQ_PORT=${RABBITMQ_PORT:-5672}
+      - RABBITMQ_USERNAME=${RABBITMQ_USERNAME:-guest}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
+    depends_on:
+      - postgres-db
+    networks:
+      - pedidos360-net
+    restart: unless-stopped
+
+  # Microservicio de Notificaciones (Consumidor RabbitMQ y Envío de Correo Real vía Gmail SMTP)
+  ms-notify:
+    build:
+      context: ./ms-pedidos360-notify
+      dockerfile: Dockerfile
+    container_name: pedidos360-notify
+    environment:
+      # Conexión al RabbitMQ (instancia EC2 de RabbitMQ)
+      - RABBITMQ_HOST=${RABBITMQ_HOST:-127.0.0.1}
+      - RABBITMQ_PORT=${RABBITMQ_PORT:-5672}
+      - RABBITMQ_USERNAME=${RABBITMQ_USERNAME:-guest}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
+      # Configuración SMTP real (Gmail)
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_AUTH=${SMTP_AUTH:-true}
+      - SMTP_STARTTLS=${SMTP_STARTTLS:-true}
+      - MAIL_FROM=${MAIL_FROM:-${SMTP_USERNAME}}
+      - MAIL_SENDER_NAME=${MAIL_SENDER_NAME:-Pedidos360}
+    networks:
+      - pedidos360-net
+    restart: unless-stopped
+
+  # ==============================================================
+  # BFF (Backend For Frontend) - API Gateway / Orquestador
+  # ==============================================================
+  bff-api:
+    build:
+      context: ./api_cloud
+      dockerfile: Dockerfile
+    container_name: bff-api
+    ports:
+      - "8088:8088"
+    environment:
+      - ENTRA_ISSUER_URI=${ENTRA_ISSUER_URI:-https://login.microsoftonline.com/7787491b-efe4-4871-852a-79e07b048a5a/v2.0}
+      - ENTRA_API_CLIENT_ID=${ENTRA_API_CLIENT_ID:-954079da-4c93-427f-9260-62b0e83029bf}
+      - SECURITY_ENABLED=${SECURITY_ENABLED:-false}
+      - ORDERS_SERVICE_URL=http://ms-orders:8087
+      - MICROSERVICE_BASE_URL=http://ms-orders:8087
+      - CATALOG_SERVICE_URL=http://ms-catalog:8086
+    depends_on:
+      - ms-orders
+      - ms-catalog
+    networks:
+      - pedidos360-net
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+
+networks:
+  pedidos360-net:
+    driver: bridge
