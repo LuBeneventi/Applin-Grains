@@ -7,6 +7,10 @@
 **/target/
 target/
 
+# Dependencias Node
+node_modules/
+**/node_modules/
+
 # IDEs y editores
 .idea/
 .vscode/

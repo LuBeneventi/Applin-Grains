@@ -1,0 +1,15 @@
+server:
+    port: 8088
+spring:
+    security:
+        enabled: ${SECURITY_ENABLED:false}
+        oauth2:
+            resourceserver:
+                jwt:
+                    issuer-uri: ${ENTRA_ISSUER_URI:https://login.microsoftonline.com/7787491b-efe4-4871-852a-79e07b048a5a/v2.0}
+                    audiences:
+                        - ${ENTRA_API_CLIENT_ID:954079da-4c93-427f-9260-62b0e83029bf}
+microservice:
+  base-url: ${MICROSERVICE_BASE_URL:http://localhost:8087}
+  orders-url: ${ORDERS_SERVICE_URL:${MICROSERVICE_BASE_URL:http://localhost:8087}}
+  catalog-url: ${CATALOG_SERVICE_URL:http://localhost:8086}
