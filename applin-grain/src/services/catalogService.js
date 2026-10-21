@@ -47,19 +47,22 @@ const mapProduct = (dto) => ({
   name: dto.nombre ?? dto.name ?? 'Sin nombre',
   description: dto.descripcion ?? dto.description ?? '',
   price: Number(dto.precio ?? dto.price ?? 0),
-  image: dto.imagen ?? dto.imagenUrl ?? dto.image ?? null,
+  // Agregado dto.imageUrl que es como lo devuelve el BFF
+  image: dto.imageUrl ?? dto.imagen ?? dto.imagenUrl ?? dto.image ?? null,
   stock: Number(dto.stock ?? 0),
 });
 
 export const catalogService = {
   async getProducts() {
-    const { data } = await http.get('/products');
+    // Cambiado de '/products' a '/catalog/products'
+    const { data } = await http.get('/catalog/products');
     const list = Array.isArray(data) ? data : (data.content ?? []); // soporta Page<>
     return list.map(mapProduct);
   },
 
   async getProductById(id) {
-    const { data } = await http.get(`/products/${id}`);
+    // Cambiado de `/products/${id}` a `/catalog/products/${id}`
+    const { data } = await http.get(`/catalog/products/${id}`);
     return mapProduct(data);
   },
 

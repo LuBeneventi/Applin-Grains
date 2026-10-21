@@ -1,14 +1,20 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// El proxy evita problemas de CORS en desarrollo.
-// /api/products  ->  http://localhost:8080/api/products (ms-pedidos360-catalog)
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    port: 5173,
-    proxy: {
-      '/api': { target: 'http://localhost:8080', changeOrigin: true },
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+  
+  return {
+    plugins: [react()],
+    server: {
+      port: 5173,
+      proxy: {
+        '/api': {
+          target: env.BFF_URL || 'http://184.197.80.147:8088',
+          changeOrigin: true,
+          secure: false,
+        },
+      },
     },
-  },
+  };
 });
