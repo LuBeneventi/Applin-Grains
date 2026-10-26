@@ -4,13 +4,10 @@ import cl.duoc.api.dto.EnrichedOrderItemDto;
 import cl.duoc.api.dto.EnrichedOrderResponseDto;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -21,6 +18,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * NOTA: la creación de pedidos (POST /api/orders) ya no está aquí:
+ * ahora la maneja CheckoutController (identidad por token, precios del catálogo
+ * y pago verificado).
+ * La edición/baja de productos (PUT/DELETE) está en AdminCatalogController.
+ */
 @RestController
 public class OrdersController {
 
@@ -46,30 +49,30 @@ public class OrdersController {
     @GetMapping("/api/catalog/products")
     public String getAllProducts() {
         return catalogServiceClient
-            .get()
-            .uri("/api/catalog/products")
-            .retrieve()
-            .body(String.class);
+                .get()
+                .uri("/api/catalog/products")
+                .retrieve()
+                .body(String.class);
     }
 
     @GetMapping("/api/catalog/products/{id}")
     public String getProductById(@PathVariable String id) {
         return catalogServiceClient
-            .get()
-            .uri("/api/catalog/products/" + id)
-            .retrieve()
-            .body(String.class);
+                .get()
+                .uri("/api/catalog/products/" + id)
+                .retrieve()
+                .body(String.class);
     }
 
     @PostMapping(value = "/api/catalog/products", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> createProduct(@RequestBody String body) {
         return catalogServiceClient
-            .post()
-            .uri("/api/catalog/products")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(body)
-            .retrieve()
-            .toEntity(String.class);
+                .post()
+                .uri("/api/catalog/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .retrieve()
+                .toEntity(String.class);
     }
 
     @PostMapping("/api/catalog/products/{id}/reduce-stock")
@@ -77,10 +80,10 @@ public class OrdersController {
             @PathVariable String id,
             @RequestParam(name = "quantity", defaultValue = "1") Integer quantity) {
         return catalogServiceClient
-            .post()
-            .uri("/api/catalog/products/" + id + "/reduce-stock?quantity=" + quantity)
-            .retrieve()
-            .toEntity(String.class);
+                .post()
+                .uri("/api/catalog/products/" + id + "/reduce-stock?quantity=" + quantity)
+                .retrieve()
+                .toEntity(String.class);
     }
 
     // ==========================================
@@ -92,129 +95,30 @@ public class OrdersController {
         String queryString = request.getQueryString();
         String targetUri = "/api/orders" + (queryString != null && !queryString.isBlank() ? "?" + queryString : "");
         return ordersServiceClient
-            .get()
-            .uri(targetUri)
-            .retrieve()
-            .body(String.class);
+                .get()
+                .uri(targetUri)
+                .retrieve()
+                .body(String.class);
     }
 
     @GetMapping("/api/orders/{id}")
     public String getOrderById(@PathVariable String id) {
         return ordersServiceClient
-            .get()
-            .uri("/api/orders/" + id)
-            .retrieve()
-            .body(String.class);
-    }
-
-    /**
-     * Crear orden a través del BFF:
-     * El cliente envía solo { "productoId": 1, "cantidad": 2 }.
-     * El BFF consulta el Catálogo para obtener el nombre y precio real vigente,
-     * ensambla el payload seguro y lo envía al microservicio de Órdenes.
-     */
-    @PostMapping(value = "/api/orders", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<?> createOrder(@RequestBody String body) {
-        try {
-            JsonNode rootNode = objectMapper.readTree(body);
-
-            // Si el payload contiene items, resolvemos descripcion y precio desde catalogo
-            if (rootNode.has("items") && rootNode.get("items").isArray()) {
-                ObjectNode orderPayload = rootNode.deepCopy();
-                ArrayNode resolvedItems = objectMapper.createArrayNode();
-
-                for (JsonNode itemNode : rootNode.get("items")) {
-                    ObjectNode itemCopy = itemNode.deepCopy();
-
-                    Long productoId = itemNode.hasNonNull("productoId") ? itemNode.get("productoId").asLong() : null;
-
-                    // Si no trae descripcion o precioUnitario pero sí tiene productoId, consultamos catálogo
-                    if (productoId != null && (!itemNode.hasNonNull("descripcion") || !itemNode.hasNonNull("precioUnitario"))) {
-                        try {
-                            String productRaw = catalogServiceClient
-                                    .get()
-                                    .uri("/api/catalog/products/" + productoId)
-                                    .retrieve()
-                                    .body(String.class);
-
-                            if (productRaw != null) {
-                                JsonNode productNode = objectMapper.readTree(productRaw);
-                                if (!itemNode.hasNonNull("descripcion") && productNode.hasNonNull("name")) {
-                                    itemCopy.put("descripcion", productNode.get("name").asText());
-                                }
-                                if (!itemNode.hasNonNull("precioUnitario") && productNode.hasNonNull("price")) {
-                                    itemCopy.put("precioUnitario", productNode.get("price").asDouble());
-                                }
-                            }
-                        } catch (Exception e) {
-                            log.error("Error al consultar el catálogo para el producto {}: {}", productoId, e.getMessage());
-                            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                                    .body(Map.of("error", "El producto con ID " + productoId + " no existe en el catálogo o no está disponible"));
-                        }
-                    }
-
-                    resolvedItems.add(itemCopy);
-                }
-
-                orderPayload.set("items", resolvedItems);
-                String resolvedBody = objectMapper.writeValueAsString(orderPayload);
-
-                ResponseEntity<String> orderResponse = ordersServiceClient
-                        .post()
-                        .uri("/api/orders")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .body(resolvedBody)
-                        .retrieve()
-                        .toEntity(String.class);
-
-                // Si la orden fue creada exitosamente en ms-orders, descontamos el stock de cada producto en ms-catalog
-                if (orderResponse.getStatusCode().is2xxSuccessful()) {
-                    for (JsonNode itemNode : resolvedItems) {
-                        Long productoId = itemNode.hasNonNull("productoId") ? itemNode.get("productoId").asLong() : null;
-                        int cantidad = itemNode.hasNonNull("cantidad") ? itemNode.get("cantidad").asInt() : 1;
-                        if (productoId != null) {
-                            try {
-                                catalogServiceClient
-                                        .post()
-                                        .uri("/api/catalog/products/" + productoId + "/reduce-stock?quantity=" + cantidad)
-                                        .retrieve()
-                                        .toBodilessEntity();
-                                log.info("Stock reducido en catálogo: productoId={}, cantidad={}", productoId, cantidad);
-                            } catch (Exception e) {
-                                log.warn("Aviso: no se pudo reducir el stock para productoId={}: {}", productoId, e.getMessage());
-                            }
-                        }
-                    }
-                }
-
-                return orderResponse;
-            }
-
-            // Fallback si no tiene array de items
-            return ordersServiceClient
-                    .post()
-                    .uri("/api/orders")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(body)
-                    .retrieve()
-                    .toEntity(String.class);
-
-        } catch (Exception e) {
-            log.error("Error al procesar la creación de la orden en el BFF: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("error", "Error procesando solicitud de orden: " + e.getMessage()));
-        }
+                .get()
+                .uri("/api/orders/" + id)
+                .retrieve()
+                .body(String.class);
     }
 
     @PutMapping(value = "/api/orders/{id}/status", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> updateOrderStatus(@PathVariable String id, @RequestBody String body) {
         return ordersServiceClient
-            .put()
-            .uri("/api/orders/" + id + "/status")
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(body)
-            .retrieve()
-            .toEntity(String.class);
+                .put()
+                .uri("/api/orders/" + id + "/status")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .retrieve()
+                .toEntity(String.class);
     }
 
     // ==========================================
@@ -242,22 +146,31 @@ public class OrdersController {
             JsonNode orderNode = objectMapper.readTree(rawOrder);
             Long orderId = orderNode.hasNonNull("id") ? orderNode.get("id").asLong() : null;
             String clienteId = orderNode.hasNonNull("clienteId") ? orderNode.get("clienteId").asText() : null;
-            String clienteNombre = orderNode.hasNonNull("clienteNombre") ? orderNode.get("clienteNombre").asText() : null;
+            String clienteNombre = orderNode.hasNonNull("clienteNombre") ? orderNode.get("clienteNombre").asText()
+                    : null;
             String clienteEmail = orderNode.hasNonNull("clienteEmail") ? orderNode.get("clienteEmail").asText() : null;
             BigDecimal total = orderNode.hasNonNull("total") ? new BigDecimal(orderNode.get("total").asText()) : null;
             String estado = orderNode.hasNonNull("estado") ? orderNode.get("estado").asText() : null;
-            String fechaCreacion = orderNode.hasNonNull("fechaCreacion") ? orderNode.get("fechaCreacion").asText() : null;
-            String fechaActualizacion = orderNode.hasNonNull("fechaActualizacion") ? orderNode.get("fechaActualizacion").asText() : null;
+            String fechaCreacion = orderNode.hasNonNull("fechaCreacion") ? orderNode.get("fechaCreacion").asText()
+                    : null;
+            String fechaActualizacion = orderNode.hasNonNull("fechaActualizacion")
+                    ? orderNode.get("fechaActualizacion").asText()
+                    : null;
 
             List<EnrichedOrderItemDto> enrichedItems = new ArrayList<>();
             if (orderNode.has("items") && orderNode.get("items").isArray()) {
                 for (JsonNode itemNode : orderNode.get("items")) {
                     Long itemId = itemNode.hasNonNull("id") ? itemNode.get("id").asLong() : null;
                     Long productoId = itemNode.hasNonNull("productoId") ? itemNode.get("productoId").asLong() : null;
-                    String descripcion = itemNode.hasNonNull("descripcion") ? itemNode.get("descripcion").asText() : null;
+                    String descripcion = itemNode.hasNonNull("descripcion") ? itemNode.get("descripcion").asText()
+                            : null;
                     Integer cantidad = itemNode.hasNonNull("cantidad") ? itemNode.get("cantidad").asInt() : null;
-                    BigDecimal precioUnitario = itemNode.hasNonNull("precioUnitario") ? new BigDecimal(itemNode.get("precioUnitario").asText()) : null;
-                    BigDecimal subtotal = itemNode.hasNonNull("subtotal") ? new BigDecimal(itemNode.get("subtotal").asText()) : null;
+                    BigDecimal precioUnitario = itemNode.hasNonNull("precioUnitario")
+                            ? new BigDecimal(itemNode.get("precioUnitario").asText())
+                            : null;
+                    BigDecimal subtotal = itemNode.hasNonNull("subtotal")
+                            ? new BigDecimal(itemNode.get("subtotal").asText())
+                            : null;
 
                     Map<String, Object> productDetail = null;
                     if (productoId != null) {
@@ -273,7 +186,8 @@ public class OrdersController {
                                 productDetail = map;
                             }
                         } catch (Exception e) {
-                            log.warn("No se pudo obtener el detalle del producto {} del catálogo: {}", productoId, e.getMessage());
+                            log.warn("No se pudo obtener el detalle del producto {} del catálogo: {}", productoId,
+                                    e.getMessage());
                         }
                     }
 
@@ -284,8 +198,7 @@ public class OrdersController {
                             cantidad,
                             precioUnitario,
                             subtotal,
-                            productDetail
-                    ));
+                            productDetail));
                 }
             }
 
@@ -298,8 +211,7 @@ public class OrdersController {
                     total,
                     estado,
                     fechaCreacion,
-                    fechaActualizacion
-            );
+                    fechaActualizacion);
 
             return ResponseEntity.ok(enrichedResponse);
         } catch (Exception e) {

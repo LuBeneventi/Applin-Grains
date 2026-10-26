@@ -1,14 +1,18 @@
 server:
-    port: 8088
+  port: 8088
 spring:
-    security:
-        enabled: ${SECURITY_ENABLED:false}
-        oauth2:
-            resourceserver:
-                jwt:
-                    issuer-uri: ${ENTRA_ISSUER_URI:https://login.microsoftonline.com/7787491b-efe4-4871-852a-79e07b048a5a/v2.0}
-                    audiences:
-                        - ${ENTRA_API_CLIENT_ID:954079da-4c93-427f-9260-62b0e83029bf}
+  security:
+    enabled: ${SECURITY_ENABLED:false}
+app:
+  security:
+    # Emisores confiables, separados por coma:
+    #  1) tu tenant (cuentas de la organización / administradores)  -> ENTRA_ISSUER_URI
+    #  2) tenant de cuentas personales Microsoft (clientes)
+    issuers: ${ENTRA_ISSUERS:${ENTRA_ISSUER_URI:https://login.microsoftonline.com/7787491b-efe4-4871-852a-79e07b048a5a/v2.0},https://login.microsoftonline.com/9188040d-6c67-4c5b-b112-36a304b66dad/v2.0}
+    audience: ${ENTRA_API_CLIENT_ID:954079da-4c93-427f-9260-62b0e83029bf}
+    admin-role: ${ENTRA_ADMIN_ROLE:Admin}
+  payments:
+    required: ${PAYMENTS_REQUIRED:true}
 microservice:
   base-url: ${MICROSERVICE_BASE_URL:http://localhost:8087}
   orders-url: ${ORDERS_SERVICE_URL:${MICROSERVICE_BASE_URL:http://localhost:8087}}
