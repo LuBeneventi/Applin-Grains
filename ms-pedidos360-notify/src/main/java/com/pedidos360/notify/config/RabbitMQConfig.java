@@ -45,21 +45,27 @@ public class RabbitMQConfig {
 
     public static final String QUEUE_CMD_EMAIL = "q.cmd.email";
     public static final String QUEUE_CMD_INVOICE = "q.cmd.invoice";
+    public static final String QUEUE_CMD_STOCK = "q.cmd.stock";
 
     public static final String QUEUE_CMD_EMAIL_DLQ = "q.cmd.email.dlq";
     public static final String QUEUE_CMD_INVOICE_DLQ = "q.cmd.invoice.dlq";
+    public static final String QUEUE_CMD_STOCK_DLQ = "q.cmd.stock.dlq";
 
     public static final String ROUTING_KEY_EMAIL_SEND = "email.send";
     public static final String ROUTING_KEY_INVOICE_GEN = "invoice.gen";
+    public static final String ROUTING_KEY_STOCK_REDUCE = "stock.reduce";
 
     public static final String ROUTING_KEY_EMAIL_TOPIC = "email.*";
     public static final String ROUTING_KEY_INVOICE_TOPIC = "invoice.*";
+    public static final String ROUTING_KEY_STOCK_TOPIC = "stock.*";
 
     // Compatibilidad legacy
     public static final String ROUTING_KEY_EMAIL = "cmd.email";
     public static final String ROUTING_KEY_INVOICE = "cmd.invoice";
+    public static final String ROUTING_KEY_STOCK = "cmd.stock";
     public static final String ROUTING_KEY_EMAIL_DLQ = "cmd.email.dlq";
     public static final String ROUTING_KEY_INVOICE_DLQ = "cmd.invoice.dlq";
+    public static final String ROUTING_KEY_STOCK_DLQ = "cmd.stock.dlq";
 
     @Bean
     public DirectExchange cmdDirectExchange() {
@@ -92,6 +98,11 @@ public class RabbitMQConfig {
         return QueueBuilder.durable(QUEUE_CMD_INVOICE_DLQ).build();
     }
 
+    @Bean
+    public Queue stockDlqQueue() {
+        return QueueBuilder.durable(QUEUE_CMD_STOCK_DLQ).build();
+    }
+
     // Bindings DLQ a cmd.dead.dlx
     @Bean
     public Binding emailDeadDlxBinding(Queue emailDlqQueue, DirectExchange cmdDeadDlxExchange) {
@@ -103,6 +114,11 @@ public class RabbitMQConfig {
         return BindingBuilder.bind(invoiceDlqQueue).to(cmdDeadDlxExchange).with(ROUTING_KEY_INVOICE_GEN);
     }
 
+    @Bean
+    public Binding stockDeadDlxBinding(Queue stockDlqQueue, DirectExchange cmdDeadDlxExchange) {
+        return BindingBuilder.bind(stockDlqQueue).to(cmdDeadDlxExchange).with(ROUTING_KEY_STOCK_REDUCE);
+    }
+
     // Bindings de compatibilidad legacy hacia cmd.dlx
     @Bean
     public Binding emailDlqBinding(Queue emailDlqQueue, DirectExchange cmdDlxExchange) {
@@ -112,6 +128,11 @@ public class RabbitMQConfig {
     @Bean
     public Binding invoiceDlqBinding(Queue invoiceDlqQueue, DirectExchange cmdDlxExchange) {
         return BindingBuilder.bind(invoiceDlqQueue).to(cmdDlxExchange).with(ROUTING_KEY_INVOICE_DLQ);
+    }
+
+    @Bean
+    public Binding stockDlqBinding(Queue stockDlqQueue, DirectExchange cmdDlxExchange) {
+        return BindingBuilder.bind(stockDlqQueue).to(cmdDlxExchange).with(ROUTING_KEY_STOCK_DLQ);
     }
 
     // Colas principales con Dead Letter configurado hacia cmd.dead.dlx
@@ -131,6 +152,14 @@ public class RabbitMQConfig {
                 .build();
     }
 
+    @Bean
+    public Queue stockQueue() {
+        return QueueBuilder.durable(QUEUE_CMD_STOCK)
+                .withArgument("x-dead-letter-exchange", EXCHANGE_CMD_DEAD_DLX)
+                .withArgument("x-dead-letter-routing-key", ROUTING_KEY_STOCK_REDUCE)
+                .build();
+    }
+
     // Bindings Direct
     @Bean
     public Binding emailDirectBinding(Queue emailQueue, DirectExchange cmdDirectExchange) {
@@ -142,7 +171,12 @@ public class RabbitMQConfig {
         return BindingBuilder.bind(invoiceQueue).to(cmdDirectExchange).with(ROUTING_KEY_INVOICE_GEN);
     }
 
-    // Bindings Direct Legacy ("cmd.email" y "cmd.invoice")
+    @Bean
+    public Binding stockDirectBinding(Queue stockQueue, DirectExchange cmdDirectExchange) {
+        return BindingBuilder.bind(stockQueue).to(cmdDirectExchange).with(ROUTING_KEY_STOCK_REDUCE);
+    }
+
+    // Bindings Direct Legacy ("cmd.email", "cmd.invoice", "cmd.stock")
     @Bean
     public Binding emailLegacyDirectBinding(Queue emailQueue, DirectExchange cmdDirectExchange) {
         return BindingBuilder.bind(emailQueue).to(cmdDirectExchange).with(ROUTING_KEY_EMAIL);
@@ -151,6 +185,11 @@ public class RabbitMQConfig {
     @Bean
     public Binding invoiceLegacyDirectBinding(Queue invoiceQueue, DirectExchange cmdDirectExchange) {
         return BindingBuilder.bind(invoiceQueue).to(cmdDirectExchange).with(ROUTING_KEY_INVOICE);
+    }
+
+    @Bean
+    public Binding stockLegacyDirectBinding(Queue stockQueue, DirectExchange cmdDirectExchange) {
+        return BindingBuilder.bind(stockQueue).to(cmdDirectExchange).with(ROUTING_KEY_STOCK);
     }
 
     // Bindings Topic
@@ -162,6 +201,11 @@ public class RabbitMQConfig {
     @Bean
     public Binding invoiceTopicBinding(Queue invoiceQueue, TopicExchange cmdTopicExchange) {
         return BindingBuilder.bind(invoiceQueue).to(cmdTopicExchange).with(ROUTING_KEY_INVOICE_TOPIC);
+    }
+
+    @Bean
+    public Binding stockTopicBinding(Queue stockQueue, TopicExchange cmdTopicExchange) {
+        return BindingBuilder.bind(stockQueue).to(cmdTopicExchange).with(ROUTING_KEY_STOCK_TOPIC);
     }
 
     @Bean

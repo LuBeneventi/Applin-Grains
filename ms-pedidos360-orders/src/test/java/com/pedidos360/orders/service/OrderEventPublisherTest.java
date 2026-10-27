@@ -7,6 +7,7 @@ import com.pedidos360.orders.entity.OrderStatus;
 import com.pedidos360.orders.event.BaseEventEnvelope;
 import com.pedidos360.orders.event.EmailPayload;
 import com.pedidos360.orders.event.InvoicePayload;
+import com.pedidos360.orders.event.StockReducePayload;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -50,14 +51,14 @@ class OrderEventPublisherTest {
     }
 
     @Test
-    @DisplayName("Debe publicar evento de correo y de factura al crear un pedido")
+    @DisplayName("Debe publicar evento de correo, factura y descuento de stock al crear un pedido")
     @SuppressWarnings("unchecked")
     void shouldPublishOrderCreatedEvents() {
         orderEventPublisher.publishOrderCreatedEvents(sampleOrder);
 
         ArgumentCaptor<BaseEventEnvelope<?>> envelopeCaptor = ArgumentCaptor.forClass(BaseEventEnvelope.class);
 
-        // Verifica que se enviaron 2 mensajes: uno a cmd.email y otro a cmd.invoice
+        // 1. Verifica evento de email
         verify(rabbitTemplate, times(1)).convertAndSend(
                 eq(RabbitMQConfig.EXCHANGE_CMD_DIRECT),
                 eq(RabbitMQConfig.ROUTING_KEY_EMAIL),
@@ -75,6 +76,7 @@ class OrderEventPublisherTest {
         assertThat(emailPayload.getOrderNumber()).isEqualTo("PED-1024");
         assertThat(emailPayload.getCustomerName()).isEqualTo("Sofía Morales");
 
+        // 2. Verifica evento de factura
         verify(rabbitTemplate, times(1)).convertAndSend(
                 eq(RabbitMQConfig.EXCHANGE_CMD_DIRECT),
                 eq(RabbitMQConfig.ROUTING_KEY_INVOICE),
@@ -94,6 +96,26 @@ class OrderEventPublisherTest {
         assertThat(invoicePayload.getCustomer().getTaxId()).isEqualTo("18.765.432-1");
         assertThat(invoicePayload.getItems()).hasSize(1);
         assertThat(invoicePayload.getTotal()).isEqualByComparingTo("15000.00");
+
+        // 3. Verifica evento de descuento de stock (q.cmd.stock)
+        verify(rabbitTemplate, times(1)).convertAndSend(
+                eq(RabbitMQConfig.EXCHANGE_CMD_DIRECT),
+                eq(RabbitMQConfig.ROUTING_KEY_STOCK),
+                envelopeCaptor.capture()
+        );
+
+        BaseEventEnvelope<?> stockEnvelope = envelopeCaptor.getValue();
+        assertThat(stockEnvelope).isNotNull();
+        assertThat(stockEnvelope.getType()).isEqualTo("cmd.stock.reduce");
+        assertThat(stockEnvelope.getEventId()).isNotBlank();
+        assertThat(stockEnvelope.getPayload()).isInstanceOf(StockReducePayload.class);
+
+        StockReducePayload stockPayload = (StockReducePayload) stockEnvelope.getPayload();
+        assertThat(stockPayload.getOrderId()).isEqualTo(1024L);
+        assertThat(stockPayload.getOrderNumber()).isEqualTo("PED-1024");
+        assertThat(stockPayload.getItems()).hasSize(1);
+        assertThat(stockPayload.getItems().get(0).getProductoId()).isEqualTo(1L);
+        assertThat(stockPayload.getItems().get(0).getCantidad()).isEqualTo(2);
     }
 
     @Test

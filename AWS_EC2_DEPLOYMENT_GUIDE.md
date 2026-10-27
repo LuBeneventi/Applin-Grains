@@ -160,6 +160,16 @@ docker compose version
    ```bash
    docker exec -it pedidos360-rabbitmq rabbitmqctl set_policy DLX_POLICY "^q\.cmd\." '{"dead-letter-exchange":"cmd.dead.dlx"}' --apply-to queues
    ```
+   *(Esta política aplica automáticamente a las 3 colas `q.cmd.email`, `q.cmd.invoice` y `q.cmd.stock`).*
+
+### 4.1 Topología de Mensajería en RabbitMQ (3 Tipos de Colas)
+La plataforma implementa 3 flujos de mensajería asíncrona independientes:
+
+| Cola Principal | Routing Key Direct (`cmd.direct`) | Routing Key Topic (`cmd.topic`) | Cola Muerta (`cmd.dead.dlx`) | Consumidor | Propósito |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`q.cmd.email`** | `email.send` | `email.*` | `q.cmd.email.dlq` | `ms-notify` | Notificaciones por correo electrónico (confirmación y despacho) |
+| **`q.cmd.invoice`** | `invoice.gen` | `invoice.*` | `q.cmd.invoice.dlq` | `ms-notify` | Generación y emisión de boleta tributaria en PDF |
+| **`q.cmd.stock`** | `stock.reduce` | `stock.*` | `q.cmd.stock.dlq` | `ms-catalog` | Descuento automático de inventario al confirmarse la orden |
 
 5. Comprueba el estado:
    ```bash

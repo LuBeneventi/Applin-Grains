@@ -37,6 +37,7 @@ class RabbitMQConfigTest {
     void testQueuesWithDeadLetterExchange() {
         Queue emailQueue = rabbitMQConfig.emailQueue();
         Queue invoiceQueue = rabbitMQConfig.invoiceQueue();
+        Queue stockQueue = rabbitMQConfig.stockQueue();
 
         assertEquals(RabbitMQConfig.QUEUE_CMD_EMAIL, emailQueue.getName());
         assertEquals(RabbitMQConfig.EXCHANGE_CMD_DEAD_DLX, emailQueue.getArguments().get("x-dead-letter-exchange"));
@@ -45,6 +46,10 @@ class RabbitMQConfigTest {
         assertEquals(RabbitMQConfig.QUEUE_CMD_INVOICE, invoiceQueue.getName());
         assertEquals(RabbitMQConfig.EXCHANGE_CMD_DEAD_DLX, invoiceQueue.getArguments().get("x-dead-letter-exchange"));
         assertEquals(RabbitMQConfig.ROUTING_KEY_INVOICE_GEN, invoiceQueue.getArguments().get("x-dead-letter-routing-key"));
+
+        assertEquals(RabbitMQConfig.QUEUE_CMD_STOCK, stockQueue.getName());
+        assertEquals(RabbitMQConfig.EXCHANGE_CMD_DEAD_DLX, stockQueue.getArguments().get("x-dead-letter-exchange"));
+        assertEquals(RabbitMQConfig.ROUTING_KEY_STOCK_REDUCE, stockQueue.getArguments().get("x-dead-letter-routing-key"));
     }
 
     @Test
@@ -52,16 +57,21 @@ class RabbitMQConfigTest {
     void testDlqQueuesAndBindings() {
         Queue emailDlq = rabbitMQConfig.emailDlqQueue();
         Queue invoiceDlq = rabbitMQConfig.invoiceDlqQueue();
+        Queue stockDlq = rabbitMQConfig.stockDlqQueue();
         DirectExchange deadDlx = rabbitMQConfig.cmdDeadDlxExchange();
 
         assertEquals(RabbitMQConfig.QUEUE_CMD_EMAIL_DLQ, emailDlq.getName());
         assertEquals(RabbitMQConfig.QUEUE_CMD_INVOICE_DLQ, invoiceDlq.getName());
+        assertEquals(RabbitMQConfig.QUEUE_CMD_STOCK_DLQ, stockDlq.getName());
 
         Binding emailDeadDlxBinding = rabbitMQConfig.emailDeadDlxBinding(emailDlq, deadDlx);
         assertEquals(RabbitMQConfig.ROUTING_KEY_EMAIL_SEND, emailDeadDlxBinding.getRoutingKey());
 
         Binding invoiceDeadDlxBinding = rabbitMQConfig.invoiceDeadDlxBinding(invoiceDlq, deadDlx);
         assertEquals(RabbitMQConfig.ROUTING_KEY_INVOICE_GEN, invoiceDeadDlxBinding.getRoutingKey());
+
+        Binding stockDeadDlxBinding = rabbitMQConfig.stockDeadDlxBinding(stockDlq, deadDlx);
+        assertEquals(RabbitMQConfig.ROUTING_KEY_STOCK_REDUCE, stockDeadDlxBinding.getRoutingKey());
     }
 
     @Test

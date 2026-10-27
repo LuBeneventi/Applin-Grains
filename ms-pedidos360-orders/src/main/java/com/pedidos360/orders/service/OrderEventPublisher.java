@@ -18,7 +18,10 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Publicador de eventos hacia RabbitMQ para integración con ms-pedidos360-notify.
+ * Publicador de eventos hacia RabbitMQ:
+ * 1. cmd.email.send -> q.cmd.email (notificaciones al cliente)
+ * 2. cmd.invoice.generate -> q.cmd.invoice (facturación y boleta)
+ * 3. cmd.stock.reduce -> q.cmd.stock (descuento de inventario en catálogo)
  */
 @Service
 public class OrderEventPublisher {
@@ -32,9 +35,10 @@ public class OrderEventPublisher {
     }
 
     /**
-     * Emite los eventos de creación de pedido:
+     * Emite los eventos de creación de pedido hacia RabbitMQ:
      * 1. Notificación por correo a la cola q.cmd.email
-     * 2. Generación de boleta tributaria en PDF a la cola q.cmd.invoice
+     * 2. Generación de boleta tributaria a la cola q.cmd.invoice
+     * 3. Descuento de stock en inventario a la cola q.cmd.stock
      */
     public void publishOrderCreatedEvents(Order order) {
         if (order == null) {
@@ -51,6 +55,12 @@ public class OrderEventPublisher {
             publishInvoiceGeneration(order);
         } catch (Exception e) {
             log.error("Error al publicar evento de facturación para pedido {}: {}", order.getId(), e.getMessage());
+        }
+
+        try {
+            publishStockReduce(order);
+        } catch (Exception e) {
+            log.error("Error al publicar evento de descuento de stock para pedido {}: {}", order.getId(), e.getMessage());
         }
     }
 
@@ -190,5 +200,40 @@ public class OrderEventPublisher {
         rabbitTemplate.convertAndSend(RabbitMQConfig.EXCHANGE_CMD_DIRECT, RabbitMQConfig.ROUTING_KEY_INVOICE_GEN, envelope);
         log.info("Evento de generación de boleta publicado exitosamente a {}: orderId={}, eventId={}",
                 RabbitMQConfig.ROUTING_KEY_INVOICE_GEN, order.getId(), eventId);
+    }
+
+    private void publishStockReduce(Order order) {
+        String eventId = UUID.randomUUID().toString();
+        String traceId = UUID.randomUUID().toString().replace("-", "");
+        String correlationId = "corr-order-" + order.getId();
+
+        List<StockItem> stockItems = order.getItems().stream()
+                .filter(item -> item.getProductoId() != null)
+                .map(item -> new StockItem(item.getProductoId(), item.getCantidad()))
+                .toList();
+
+        if (stockItems.isEmpty()) {
+            return;
+        }
+
+        StockReducePayload payload = new StockReducePayload(
+                order.getId(),
+                "PED-" + order.getId(),
+                stockItems,
+                Instant.now()
+        );
+
+        BaseEventEnvelope<StockReducePayload> envelope = new BaseEventEnvelope<>(
+                "cmd.stock.reduce",
+                eventId,
+                Instant.now(),
+                traceId,
+                correlationId,
+                payload
+        );
+
+        rabbitTemplate.convertAndSend(RabbitMQConfig.EXCHANGE_CMD_DIRECT, RabbitMQConfig.ROUTING_KEY_STOCK_REDUCE, envelope);
+        log.info("Evento de descuento de stock publicado exitosamente a {}: orderId={}, eventId={}, items={}",
+                RabbitMQConfig.ROUTING_KEY_STOCK_REDUCE, order.getId(), eventId, stockItems.size());
     }
 }

@@ -19,10 +19,12 @@ public class RabbitMQConfig {
 
     public static final String ROUTING_KEY_EMAIL_SEND = "email.send";
     public static final String ROUTING_KEY_INVOICE_GEN = "invoice.gen";
+    public static final String ROUTING_KEY_STOCK_REDUCE = "stock.reduce";
 
     // Aliases para compatibilidad
     public static final String ROUTING_KEY_EMAIL = ROUTING_KEY_EMAIL_SEND;
     public static final String ROUTING_KEY_INVOICE = ROUTING_KEY_INVOICE_GEN;
+    public static final String ROUTING_KEY_STOCK = ROUTING_KEY_STOCK_REDUCE;
 
     @Bean
     public DirectExchange cmdDirectExchange() {
