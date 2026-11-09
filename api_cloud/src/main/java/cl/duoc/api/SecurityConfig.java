@@ -75,6 +75,7 @@ public class SecurityConfig {
                     .requestMatchers("/api/orders/**").hasAuthority(admin)
                     .requestMatchers("/api/catalog/**").hasAuthority(admin)
                     .requestMatchers("/api/audit/**").hasAuthority(admin)
+                    .requestMatchers("/api/reports/**").hasAuthority(admin)
                     .anyRequest().authenticated()
                 )
                 .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt

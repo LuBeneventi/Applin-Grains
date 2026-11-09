@@ -188,6 +188,30 @@ services:
       - pedidos360-net
     restart: unless-stopped
 
+  # Microservicio de Reportería y KPIs (Kafka Consumer & KPI Charts API)
+  ms-report:
+    build:
+      context: ./ms-pedidos360-report
+      dockerfile: Dockerfile
+    container_name: pedidos360-report
+    ports:
+      - "8090:8090"
+    environment:
+      - PORT=8090
+      - DB_HOST=postgres-db
+      - DB_PORT=5432
+      - DB_NAME=pedidos360_report
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_SSLMODE=disable
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+    depends_on:
+      - postgres-db
+      - kafka
+    networks:
+      - pedidos360-net
+    restart: unless-stopped
+
   # ==============================================================
   # BFF (Backend For Frontend) - API Gateway / Orquestador
   # ==============================================================
@@ -206,10 +230,12 @@ services:
       - MICROSERVICE_BASE_URL=http://ms-orders:8087
       - CATALOG_SERVICE_URL=http://ms-catalog:8086
       - AUDIT_SERVICE_URL=http://ms-audit:8089
+      - REPORT_SERVICE_URL=http://ms-report:8090
     depends_on:
       - ms-orders
       - ms-catalog
       - ms-audit
+      - ms-report
     networks:
       - pedidos360-net
     restart: unless-stopped

@@ -30,6 +30,13 @@ public class RestClientConfig {
     }
 
     @Bean
+    RestClient reportServiceClient(
+        @Value("${microservice.report-url:http://localhost:8090}") String reportUrl
+    ) {
+        return RestClient.builder().baseUrl(reportUrl).build();
+    }
+
+    @Bean
     com.fasterxml.jackson.databind.ObjectMapper objectMapper() {
         return new com.fasterxml.jackson.databind.ObjectMapper();
     }
