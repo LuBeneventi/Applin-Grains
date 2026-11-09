@@ -74,6 +74,7 @@ public class SecurityConfig {
                     // Lo demás de pedidos y toda escritura del catálogo: solo administradores
                     .requestMatchers("/api/orders/**").hasAuthority(admin)
                     .requestMatchers("/api/catalog/**").hasAuthority(admin)
+                    .requestMatchers("/api/audit/**").hasAuthority(admin)
                     .anyRequest().authenticated()
                 )
                 .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt

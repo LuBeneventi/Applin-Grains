@@ -23,6 +23,13 @@ public class RestClientConfig {
     }
 
     @Bean
+    RestClient auditServiceClient(
+        @Value("${microservice.audit-url:http://localhost:8089}") String auditUrl
+    ) {
+        return RestClient.builder().baseUrl(auditUrl).build();
+    }
+
+    @Bean
     com.fasterxml.jackson.databind.ObjectMapper objectMapper() {
         return new com.fasterxml.jackson.databind.ObjectMapper();
     }
