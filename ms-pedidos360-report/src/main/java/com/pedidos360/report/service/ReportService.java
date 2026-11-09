@@ -82,10 +82,13 @@ public class ReportService {
         JsonNode itemsNode = root.get("items");
         if (itemsNode != null && itemsNode.isArray()) {
             for (JsonNode it : itemsNode) {
-                Long prodId = it.path("productoId").asLong(0);
-                String desc = it.path("descripcion").asText("Producto " + prodId);
-                int qty = it.path("cantidad").asInt(1);
-                BigDecimal unitPrice = it.hasNonNull("precioUnitario") ? new BigDecimal(it.get("precioUnitario").asText()) : BigDecimal.ZERO;
+                // Soporte para ambos formatos: eventos reales (productId/productName) y legado (productoId/descripcion)
+                Long prodId = it.hasNonNull("productId") ? it.path("productId").asLong(0) : it.path("productoId").asLong(0);
+                String desc = it.hasNonNull("productName") ? it.path("productName").asText("Producto " + prodId)
+                                                           : it.path("descripcion").asText("Producto " + prodId);
+                int qty = it.hasNonNull("quantity") ? it.path("quantity").asInt(1) : it.path("cantidad").asInt(1);
+                BigDecimal unitPrice = it.hasNonNull("unitPrice") ? new BigDecimal(it.get("unitPrice").asText())
+                        : it.hasNonNull("precioUnitario") ? new BigDecimal(it.get("precioUnitario").asText()) : BigDecimal.ZERO;
                 BigDecimal subtotal = it.hasNonNull("subtotal") ? new BigDecimal(it.get("subtotal").asText()) : unitPrice.multiply(BigDecimal.valueOf(qty));
 
                 ReportOrderItem item = new ReportOrderItem(prodId, desc, qty, unitPrice, subtotal);
