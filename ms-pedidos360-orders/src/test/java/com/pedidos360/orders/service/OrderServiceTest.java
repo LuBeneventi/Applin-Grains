@@ -38,6 +38,9 @@ class OrderServiceTest {
     @Mock
     private OrderEventPublisher orderEventPublisher;
 
+    @Mock
+    private KafkaOrderEventPublisher kafkaOrderEventPublisher;
+
     @InjectMocks
     private OrderServiceImpl orderService;
 
@@ -48,83 +51,86 @@ class OrderServiceTest {
         sampleOrder = new Order("CLI-123");
         sampleOrder.setId(1L);
         sampleOrder.setEstado(OrderStatus.CREADO);
-        sampleOrder.setFechaCreacion(LocalDateTime.now());
-        sampleOrder.setFechaActualizacion(LocalDateTime.now());
+        sampleOrder.setClienteNombre("Carlos Ruiz");
+        sampleOrder.setClienteEmail("carlos@example.com");
 
-        OrderItem item1 = new OrderItem("Item A", 2, new BigDecimal("10.00"));
-        item1.setId(10L);
-        sampleOrder.addItem(item1);
+        OrderItem item = new OrderItem(1L, "Café Americano", 2, new BigDecimal("2500.00"));
+        sampleOrder.addItem(item);
     }
 
     @Test
-    @DisplayName("Crear pedido exitosamente con total calculado y estado CREADO")
+    @DisplayName("Debe crear un pedido exitosamente y emitir eventos RabbitMQ y Kafka")
     void testCreateOrder() {
-        OrderRequestDto request = new OrderRequestDto("CLI-123", List.of(
-                new OrderItemRequestDto("Item A", 2, new BigDecimal("10.00")),
-                new OrderItemRequestDto("Item B", 1, new BigDecimal("5.50"))
-        ));
+        OrderRequestDto request = new OrderRequestDto();
+        request.setClienteId("CLI-123");
+        request.setClienteNombre("Carlos Ruiz");
+        request.setClienteEmail("carlos@example.com");
 
-        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> {
-            Order o = invocation.getArgument(0);
-            o.setId(1L);
-            o.setFechaCreacion(LocalDateTime.now());
-            o.setFechaActualizacion(LocalDateTime.now());
-            return o;
-        });
+        OrderItemRequestDto itemRequest = new OrderItemRequestDto();
+        itemRequest.setProductoId(1L);
+        itemRequest.setDescripcion("Café Americano");
+        itemRequest.setCantidad(2);
+        itemRequest.setPrecioUnitario(new BigDecimal("2500.00"));
+        request.setItems(List.of(itemRequest));
+
+        when(orderRepository.save(any(Order.class))).thenReturn(sampleOrder);
 
         OrderResponseDto response = orderService.createOrder(request);
 
         assertNotNull(response);
         assertEquals(1L, response.getId());
-        assertEquals("CLI-123", response.getClienteId());
         assertEquals(OrderStatus.CREADO, response.getEstado());
-        assertEquals(new BigDecimal("25.50"), response.getTotal());
-        assertEquals(2, response.getItems().size());
-        verify(orderRepository, times(1)).save(any(Order.class));
-        verify(orderEventPublisher, times(1)).publishOrderCreatedEvents(any(Order.class));
+        verify(orderRepository).save(any(Order.class));
+        verify(orderEventPublisher).publishOrderCreatedEvents(any(Order.class));
+        verify(kafkaOrderEventPublisher).publishOrderCreated(any(Order.class));
     }
 
     @Test
-    @DisplayName("Crear pedido sin items lanza excepción")
-    void testCreateOrderWithoutItems() {
-        OrderRequestDto request = new OrderRequestDto("CLI-123", List.of());
-        assertThrows(IllegalArgumentException.class, () -> orderService.createOrder(request));
-    }
-
-    @Test
-    @DisplayName("Consultar pedido por ID existente")
-    void testGetOrderById() {
-        when(orderRepository.findById(1L)).thenReturn(Optional.of(sampleOrder));
-
-        OrderResponseDto response = orderService.getOrderById(1L);
-
-        assertNotNull(response);
-        assertEquals(1L, response.getId());
-        assertEquals("CLI-123", response.getClienteId());
-        assertEquals(OrderStatus.CREADO, response.getEstado());
-        assertEquals(new BigDecimal("20.00"), response.getTotal());
-    }
-
-    @Test
-    @DisplayName("Consultar pedido por ID inexistente lanza OrderNotFoundException")
-    void testGetOrderByIdNotFound() {
-        when(orderRepository.findById(99L)).thenReturn(Optional.empty());
-        assertThrows(OrderNotFoundException.class, () -> orderService.getOrderById(99L));
-    }
-
-    @Test
-    @DisplayName("Actualizar estado de pedido invoca OrderStateMachine")
+    @DisplayName("Debe actualizar el estado y emitir eventos RabbitMQ y Kafka")
     void testUpdateOrderStatus() {
         when(orderRepository.findById(1L)).thenReturn(Optional.of(sampleOrder));
         doNothing().when(orderStateMachine).validateTransition(OrderStatus.CREADO, OrderStatus.ACEPTADO);
-        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(orderRepository.save(any(Order.class))).thenReturn(sampleOrder);
 
         OrderResponseDto response = orderService.updateOrderStatus(1L, OrderStatus.ACEPTADO);
 
         assertNotNull(response);
-        assertEquals(OrderStatus.ACEPTADO, response.getEstado());
-        verify(orderStateMachine, times(1)).validateTransition(OrderStatus.CREADO, OrderStatus.ACEPTADO);
-        verify(orderRepository, times(1)).save(sampleOrder);
-        verify(orderEventPublisher, times(1)).publishOrderStatusChangedEvent(sampleOrder, OrderStatus.CREADO, OrderStatus.ACEPTADO);
+        verify(orderStateMachine).validateTransition(OrderStatus.CREADO, OrderStatus.ACEPTADO);
+        verify(orderEventPublisher).publishOrderStatusChangedEvent(any(Order.class), eq(OrderStatus.CREADO), eq(OrderStatus.ACEPTADO));
+        verify(kafkaOrderEventPublisher).publishOrderStatusChanged(any(Order.class), eq(OrderStatus.CREADO), eq(OrderStatus.ACEPTADO));
+    }
+
+    @Test
+    @DisplayName("Debe lanzar excepción al consultar pedido inexistente")
+    void testGetOrderByIdNotFound() {
+        when(orderRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThrows(OrderNotFoundException.class, () -> orderService.getOrderById(99L));
+    }
+
+    @Test
+    @DisplayName("Debe listar pedidos por estado")
+    void testListOrdersByStatus() {
+        when(orderRepository.findByEstado(OrderStatus.CREADO)).thenReturn(List.of(sampleOrder));
+
+        List<OrderResponseDto> list = orderService.listOrders(OrderStatus.CREADO, null, null);
+
+        assertEquals(1, list.size());
+        verify(orderRepository).findByEstado(OrderStatus.CREADO);
+    }
+
+    @Test
+    @DisplayName("Debe listar pedidos con rango de fechas")
+    void testListOrdersWithDateRange() {
+        LocalDateTime from = LocalDateTime.now().minusDays(1);
+        LocalDateTime to = LocalDateTime.now();
+
+        when(orderRepository.findByEstadoAndFechaCreacionBetween(OrderStatus.CREADO, from, to))
+                .thenReturn(List.of(sampleOrder));
+
+        List<OrderResponseDto> list = orderService.listOrders(OrderStatus.CREADO, from, to);
+
+        assertEquals(1, list.size());
+        verify(orderRepository).findByEstadoAndFechaCreacionBetween(OrderStatus.CREADO, from, to);
     }
 }

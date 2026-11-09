@@ -8,6 +8,7 @@ import com.pedidos360.orders.entity.Order;
 import com.pedidos360.orders.entity.OrderItem;
 import com.pedidos360.orders.entity.OrderStatus;
 import com.pedidos360.orders.repository.OrderRepository;
+import com.pedidos360.orders.service.KafkaOrderEventPublisher;
 import com.pedidos360.orders.service.OrderEventPublisher;
 import com.pedidos360.orders.service.OrderService;
 import com.pedidos360.orders.service.OrderStateMachine;
@@ -26,13 +27,16 @@ public class OrderServiceImpl implements OrderService {
     private final OrderRepository orderRepository;
     private final OrderStateMachine orderStateMachine;
     private final OrderEventPublisher orderEventPublisher;
+    private final KafkaOrderEventPublisher kafkaOrderEventPublisher;
 
     public OrderServiceImpl(OrderRepository orderRepository,
                             OrderStateMachine orderStateMachine,
-                            OrderEventPublisher orderEventPublisher) {
+                            OrderEventPublisher orderEventPublisher,
+                            KafkaOrderEventPublisher kafkaOrderEventPublisher) {
         this.orderRepository = orderRepository;
         this.orderStateMachine = orderStateMachine;
         this.orderEventPublisher = orderEventPublisher;
+        this.kafkaOrderEventPublisher = kafkaOrderEventPublisher;
     }
 
     @Override
@@ -72,8 +76,11 @@ public class OrderServiceImpl implements OrderService {
 
         Order saved = orderRepository.save(order);
 
-        // Notificar creación y solicitud de boleta/factura vía RabbitMQ
+        // 1. Notificar comandos directos vía RabbitMQ (Email, Invoice, Stock)
         orderEventPublisher.publishOrderCreatedEvents(saved);
+
+        // 2. Notificar evento canónico de negocio vía Apache Kafka (orders.events -> OrderCreated)
+        kafkaOrderEventPublisher.publishOrderCreated(saved);
 
         return mapToResponseDto(saved);
     }
@@ -108,8 +115,11 @@ public class OrderServiceImpl implements OrderService {
         order.setEstado(nuevoEstado);
         Order updated = orderRepository.save(order);
 
-        // Notificar cambio de estado vía RabbitMQ
+        // 1. Notificar cambio de estado vía RabbitMQ (Email)
         orderEventPublisher.publishOrderStatusChangedEvent(updated, previousStatus, nuevoEstado);
+
+        // 2. Notificar cambio de estado canónico vía Kafka (orders.events -> OrderAccepted/OrderPreparing/etc)
+        kafkaOrderEventPublisher.publishOrderStatusChanged(updated, previousStatus, nuevoEstado);
 
         return mapToResponseDto(updated);
     }

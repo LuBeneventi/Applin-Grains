@@ -1,0 +1,78 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: pedidos360-zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    networks:
+      - kafka-net
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: pedidos360-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://${KAFKA_HOST:-localhost}:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - kafka-net
+    restart: unless-stopped
+
+  # Contenedor opcional para crear los tópicos iniciales con sus particiones y retención
+  kafka-init-topics:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: pedidos360-kafka-init-topics
+    depends_on:
+      - kafka
+    entrypoint: [ "/bin/sh", "-c" ]
+    command: |
+      "
+      # Esperar a que Kafka esté listo
+      echo 'Esperando a que Kafka inicie...'
+      cub kafka-ready -b kafka:9092 1 40
+
+      echo 'Creando tópicos de la evaluación...'
+      # 1. orders.events: 3 particiones, delete, retención 7 días (604800000 ms)
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic orders.events --config cleanup.policy=delete --config retention.ms=604800000
+
+      # 2. audit.timeline: 3 particiones, compact,delete, retención 30 días (2592000000 ms)
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic audit.timeline --config cleanup.policy=compact,delete --config retention.ms=2592000000
+
+      # 3. DLTs para los consumidores (orders.events.DLT, audit.timeline.DLT)
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic orders.events.DLT --config cleanup.policy=delete --config retention.ms=1209600000
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic audit.timeline.DLT --config cleanup.policy=delete --config retention.ms=1209600000
+
+      echo 'Tópicos creados exitosamente:'
+      kafka-topics --list --bootstrap-server kafka:9092
+      "
+    networks:
+      - kafka-net
+
+volumes:
+  zookeeper_data:
+  zookeeper_log:
+  kafka_data:
+
+networks:
+  kafka-net:
+    driver: bridge

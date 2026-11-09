@@ -1,6 +1,6 @@
 services:
   # ==============================================================
-  # BASE DE DATOS POSTGRESQL (Catálogo y Órdenes)
+  # BASE DE DATOS POSTGRESQL (Catálogo, Órdenes, Auditoría, Reportes)
   # ==============================================================
   postgres-db:
     image: postgres:16-alpine
@@ -17,6 +17,71 @@ services:
     networks:
       - pedidos360-net
     restart: unless-stopped
+
+  # ==============================================================
+  # INFRAESTRUCTURA DE STREAMING - APACHE KAFKA & ZOOKEEPER
+  # ==============================================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: pedidos360-zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    networks:
+      - pedidos360-net
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: pedidos360-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://${KAFKA_HOST:-localhost}:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - pedidos360-net
+    restart: unless-stopped
+
+  kafka-init-topics:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: pedidos360-kafka-init-topics
+    depends_on:
+      - kafka
+    entrypoint: [ "/bin/sh", "-c" ]
+    command: |
+      "
+      echo 'Esperando a que Kafka inicie...'
+      cub kafka-ready -b kafka:9092 1 40
+
+      echo 'Creando tópicos de la evaluación...'
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic orders.events --config cleanup.policy=delete --config retention.ms=604800000
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic audit.timeline --config cleanup.policy=compact,delete --config retention.ms=2592000000
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic orders.events.DLT --config cleanup.policy=delete --config retention.ms=1209600000
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --topic audit.timeline.DLT --config cleanup.policy=delete --config retention.ms=1209600000
+
+      echo 'Tópicos creados exitosamente:'
+      kafka-topics --list --bootstrap-server kafka:9092
+      "
+    networks:
+      - pedidos360-net
 
   # ==============================================================
   # MICROSERVICIOS DE NEGOCIO
@@ -38,7 +103,6 @@ services:
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
       - DB_SSLMODE=disable
-      # Conexión al RabbitMQ (instancia EC2 de RabbitMQ) para consumo de eventos de stock
       - RABBITMQ_HOST=${RABBITMQ_HOST:-127.0.0.1}
       - RABBITMQ_PORT=${RABBITMQ_PORT:-5672}
       - RABBITMQ_USERNAME=${RABBITMQ_USERNAME:-guest}
@@ -65,30 +129,29 @@ services:
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
       - DB_SSLMODE=disable
-      # Conexión al RabbitMQ (instancia EC2 de RabbitMQ)
       - RABBITMQ_HOST=${RABBITMQ_HOST:-127.0.0.1}
       - RABBITMQ_PORT=${RABBITMQ_PORT:-5672}
       - RABBITMQ_USERNAME=${RABBITMQ_USERNAME:-guest}
       - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
     depends_on:
       - postgres-db
+      - kafka
     networks:
       - pedidos360-net
     restart: unless-stopped
 
-  # Microservicio de Notificaciones (Consumidor RabbitMQ y Envío de Correo Real vía Gmail SMTP)
+  # Microservicio de Notificaciones (RabbitMQ -> Gmail SMTP)
   ms-notify:
     build:
       context: ./ms-pedidos360-notify
       dockerfile: Dockerfile
     container_name: pedidos360-notify
     environment:
-      # Conexión al RabbitMQ (instancia EC2 de RabbitMQ)
       - RABBITMQ_HOST=${RABBITMQ_HOST:-127.0.0.1}
       - RABBITMQ_PORT=${RABBITMQ_PORT:-5672}
       - RABBITMQ_USERNAME=${RABBITMQ_USERNAME:-guest}
       - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
-      # Configuración SMTP real (Gmail)
       - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USERNAME=${SMTP_USERNAME}
@@ -127,6 +190,9 @@ services:
 
 volumes:
   pgdata:
+  zookeeper_data:
+  zookeeper_log:
+  kafka_data:
 
 networks:
   pedidos360-net:
